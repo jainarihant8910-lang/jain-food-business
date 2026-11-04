@@ -13,7 +13,7 @@ if (canvas && stage && !window.matchMedia("(prefers-reduced-motion: reduce)").ma
     renderer.toneMappingExposure = 1.2;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(34, stage.clientWidth / stage.clientHeight, 0.1, 30);
+    const camera = new THREE.PerspectiveCamera(34, stage.clientWidth / stage.clientHeight, 0.1, 60);
     camera.position.set(0, 3.5, 12.5);
     camera.lookAt(0, 0, 0);
     scene.add(new THREE.HemisphereLight(0xffffff, 0x8b967d, 2.3));
@@ -59,6 +59,7 @@ if (canvas && stage && !window.matchMedia("(prefers-reduced-motion: reduce)").ma
     };
 
     const compartments = [];
+    const compartmentPhotoMeshes = [];
     const makeLayer = (y, kind) => {
       const group = new THREE.Group();
       group.position.y = y;
@@ -99,6 +100,13 @@ if (canvas && stage && !window.matchMedia("(prefers-reduced-motion: reduce)").ma
           sphere(roti.position.x + 0.11, roti.position.y + 0.02, -0.1, 0.08, 0.022, 0.06, foodMat(0x91603a), group);
         }
       }
+      const photoMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+      const photoDisc = new THREE.Mesh(new THREE.CircleGeometry(0.82, 64), photoMaterial);
+      photoDisc.rotation.x = -Math.PI / 2;
+      photoDisc.position.y = 0.235;
+      photoDisc.visible = false;
+      group.add(photoDisc);
+      compartmentPhotoMeshes.push(photoDisc);
       compartments.push(group);
       return group;
     };
@@ -123,6 +131,30 @@ if (canvas && stage && !window.matchMedia("(prefers-reduced-motion: reduce)").ma
     knob.position.set(1.02, 0.09, 0);
     lidPivot.add(knob);
 
+    const loadCompartmentPhotos = async () => {
+      const config = window.JFF_CONFIG || {};
+      if (!config.supabaseUrl || !config.supabaseAnonKey || !window.supabase?.createClient) return;
+      const db = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+      const keys = ["animation_roti_image", "animation_sabzi_image", "animation_rice_image", "animation_dal_image"];
+      const { data, error } = await db.from("website_content").select("content_key,content_value").eq("business", "tiffin").in("content_key", keys);
+      if (error) return;
+      const textureLoader = new THREE.TextureLoader();
+      (data || []).forEach((row) => {
+        const index = keys.indexOf(row.content_key);
+        if (index < 0 || !/^https?:\/\//i.test(row.content_value || "")) return;
+        textureLoader.load(row.content_value, (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          const mesh = compartmentPhotoMeshes[index];
+          mesh.material.map = texture;
+          mesh.material.opacity = 1;
+          mesh.material.needsUpdate = true;
+          mesh.visible = true;
+          renderer.render(scene, camera);
+        });
+      });
+    };
+    loadCompartmentPhotos();
+
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(1.45, 48), new THREE.MeshBasicMaterial({ color: 0x314539, transparent: true, opacity: 0.1 }));
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = -1.57;
@@ -134,36 +166,40 @@ if (canvas && stage && !window.matchMedia("(prefers-reduced-motion: reduce)").ma
       if (!width || !height) return;
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
-      const mobile = window.innerWidth < 620;
-      camera.position.z = 12.5;
-      camera.position.y = 3.5;
-      camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
       renderer.render(scene, camera);
     };
+    let lastSmooth = 0;
+    const ease = (value) => { const t = Math.max(0, Math.min(1, value)); return t * t * (3 - 2 * t); };
     const setProgress = () => {
       const rect = scrollSection.getBoundingClientRect();
       const progress = Math.max(0, Math.min(1, -rect.top / Math.max(1, scrollSection.offsetHeight - window.innerHeight)));
       const smooth = progress * progress * (3 - 2 * progress);
+      lastSmooth = smooth;
       const mobile = window.innerWidth < 620;
-      const xTargets = mobile ? [0, 0, 0, 0] : [-2.1, -0.7, 0.7, 2.1];
-      const yTargets = mobile ? [-1.6, -0.55, 0.55, 1.6] : [-0.25, 0.25, -0.25, 0.25];
+      const xTargets = mobile ? [-3.15, -1.05, 1.05, 3.15] : [-3.45, -1.15, 1.15, 3.45];
+      const yTargets = [0, 0, 0, 0];
       const baseY = [-1.28, -0.77, -0.26, 0.25];
-      const ease = (value) => { const t = Math.max(0, Math.min(1, value)); return t * t * (3 - 2 * t); };
       const lidOpen = ease(smooth * 3.3);
-      const lidTravel = ease((smooth - 0.24) * 1.65);
-      lidPivot.rotation.z = -lidOpen * 1.65 - lidTravel * 0.55;
-      lidPivot.rotation.x = lidTravel * (mobile ? -0.15 : 0.28);
-      lidPivot.position.x = -1.02 + lidTravel * 0.8;
-      lidPivot.position.y = 0.56 + lidOpen * 0.8 + lidTravel * 1.05;
+      const lidTravel = ease((smooth - 0.16) * 1.75);
+      const topDistance = mobile ? 29 : 14;
+      camera.position.set(0, 3.5 + (topDistance - 3.5) * smooth, 12.5 * (1 - smooth) + 0.01 * smooth);
+      camera.up.set(0, 1 - smooth, -smooth).normalize();
+      camera.lookAt(0, 0, 0);
+      camera.updateProjectionMatrix();
+      root.rotation.y = -0.2 * (1 - smooth);
+      lidPivot.rotation.z = -lidOpen * 0.42 - lidTravel * 0.28;
+      lidPivot.rotation.x = lidTravel * 0.22;
+      lidPivot.position.set(-1.02, 0.56 + lidOpen * 0.38, lidTravel * 7.5);
+      lidPivot.scale.setScalar(1 - lidTravel);
       compartments.forEach((item, index) => {
         const reveal = ease((smooth - 0.08 - index * 0.14) * 3.2);
         const travel = ease((smooth - 0.2 - index * 0.11) * 2.7);
         item.position.x = travel * xTargets[index];
-        item.position.y = baseY[index] + reveal * 0.25 + travel * (yTargets[index] - baseY[index]);
-        item.position.z = travel * [0.25, -0.35, 0.3, -0.2][index];
-        item.rotation.z = (index % 2 ? -1 : 1) * (reveal * 0.08 + travel * 0.07);
-        item.rotation.y = travel * (index % 2 ? -0.45 : 0.45);
+        item.position.y = baseY[index] * (1 - travel) + reveal * 0.18 * (1 - travel) + travel * yTargets[index];
+        item.position.z = travel * [0.02, -0.02, 0.02, -0.02][index];
+        item.rotation.z = (index % 2 ? -1 : 1) * reveal * 0.045 * (1 - travel);
+        item.rotation.y = travel * (index % 2 ? -0.03 : 0.03);
       });
       document.querySelectorAll("[data-scroll-step]").forEach((step) => {
         const index = Number(step.dataset.scrollStep);
@@ -175,7 +211,7 @@ if (canvas && stage && !window.matchMedia("(prefers-reduced-motion: reduce)").ma
       if (entries[0].isIntersecting) renderer.render(scene, camera);
     }, { threshold: 0.02 });
     observer.observe(scrollSection);
-    window.addEventListener("resize", resize, { passive: true });
+    window.addEventListener("resize", () => { resize(); setProgress(); }, { passive: true });
     window.addEventListener("scroll", setProgress, { passive: true });
     resize();
     setProgress();
