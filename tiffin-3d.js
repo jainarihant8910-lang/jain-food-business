@@ -70,18 +70,20 @@ if (canvas && stage && !window.matchMedia("(prefers-reduced-motion: reduce)").ma
       group.add(shell);
       cylinder(0.94, 0.94, 0.045, darkSteel, -0.16, group);
       torus(1.01, 0.045, brightSteel, 0.17, group);
+      const foodGroup = new THREE.Group();
+      group.add(foodGroup);
       if (kind === "dal") {
-        cylinder(0.87, 0.87, 0.025, foodMat(0xd99a46), 0.19, group);
+        cylinder(0.87, 0.87, 0.025, foodMat(0xd99a46), 0.19, foodGroup);
         for (let i = 0; i < 12; i++) {
           const a = i * Math.PI * 2 / 12;
-          sphere(Math.cos(a) * 0.58, 0.23, Math.sin(a) * 0.58, 0.035, 0.02, 0.035, brass, group);
+          sphere(Math.cos(a) * 0.58, 0.23, Math.sin(a) * 0.58, 0.035, 0.02, 0.035, brass, foodGroup);
         }
       } else if (kind === "rice") {
         const rice = foodMat(0xfff9e7);
         for (let i = 0; i < 38; i++) {
           const a = i * 2.4;
           const r = 0.15 + (i % 5) * 0.13;
-          sphere(Math.cos(a) * r, 0.22 + (i % 3) * 0.013, Math.sin(a) * r, 0.11, 0.035, 0.045, rice, group);
+          sphere(Math.cos(a) * r, 0.22 + (i % 3) * 0.013, Math.sin(a) * r, 0.11, 0.035, 0.045, rice, foodGroup);
         }
       } else if (kind === "sabzi") {
         const colors = [0x758348, 0xc59b4d, 0x9e5940, 0x9da56c, 0xceb986];
@@ -89,22 +91,23 @@ if (canvas && stage && !window.matchMedia("(prefers-reduced-motion: reduce)").ma
           const a = i * 2.4;
           const r = 0.12 + (i % 6) * 0.105;
           const size = 0.07 + (i % 3) * 0.025;
-          sphere(Math.cos(a) * r, 0.22 + (i % 3) * 0.018, Math.sin(a) * r, size, size * 0.65, size * 1.15, foodMat(colors[i % colors.length]), group);
+          sphere(Math.cos(a) * r, 0.22 + (i % 3) * 0.018, Math.sin(a) * r, size, size * 0.65, size * 1.15, foodMat(colors[i % colors.length]), foodGroup);
         }
       } else {
         for (let i = 0; i < 3; i++) {
           const roti = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.035, 48), foodMat(0xd6a45b));
           roti.position.set((i - 1) * 0.12, 0.22 + i * 0.035, 0.02);
           roti.rotation.y = i * 0.3;
-          group.add(roti);
-          sphere(roti.position.x + 0.11, roti.position.y + 0.02, -0.1, 0.08, 0.022, 0.06, foodMat(0x91603a), group);
+          foodGroup.add(roti);
+          sphere(roti.position.x + 0.11, roti.position.y + 0.02, -0.1, 0.08, 0.022, 0.06, foodMat(0x91603a), foodGroup);
         }
       }
-      const photoMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
-      const photoDisc = new THREE.Mesh(new THREE.CircleGeometry(0.82, 64), photoMaterial);
+      const photoMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0, roughness: 0.92, metalness: 0, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
+      const photoDisc = new THREE.Mesh(new THREE.CircleGeometry(0.78, 64), photoMaterial);
       photoDisc.rotation.x = -Math.PI / 2;
-      photoDisc.position.y = 0.235;
+      photoDisc.position.y = 0.12;
       photoDisc.visible = false;
+      photoDisc.userData.foodGroup = foodGroup;
       group.add(photoDisc);
       compartmentPhotoMeshes.push(photoDisc);
       compartments.push(group);
@@ -144,11 +147,25 @@ if (canvas && stage && !window.matchMedia("(prefers-reduced-motion: reduce)").ma
         if (index < 0 || !/^https?:\/\//i.test(row.content_value || "")) return;
         textureLoader.load(row.content_value, (texture) => {
           texture.colorSpace = THREE.SRGBColorSpace;
+          texture.wrapS = THREE.ClampToEdgeWrapping;
+          texture.wrapT = THREE.ClampToEdgeWrapping;
+          const imageWidth = texture.image?.naturalWidth || texture.image?.width || 1;
+          const imageHeight = texture.image?.naturalHeight || texture.image?.height || 1;
+          const aspect = imageWidth / imageHeight;
+          if (aspect > 1) {
+            texture.repeat.set(1 / aspect, 1);
+            texture.offset.set((1 - 1 / aspect) / 2, 0);
+          } else {
+            texture.repeat.set(1, aspect);
+            texture.offset.set(0, (1 - aspect) / 2);
+          }
+          texture.needsUpdate = true;
           const mesh = compartmentPhotoMeshes[index];
           mesh.material.map = texture;
           mesh.material.opacity = 1;
           mesh.material.needsUpdate = true;
           mesh.visible = true;
+          mesh.userData.foodGroup.visible = false;
           renderer.render(scene, camera);
         });
       });
